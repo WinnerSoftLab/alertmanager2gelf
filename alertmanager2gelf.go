@@ -49,9 +49,6 @@ func main() {
 		log.Fatalf("gelf.NewWriter: %s", err)
 	}
 	defer gelfWriter.Close()
-	//// Log to graylog2
-	//log.SetFlags(0) // Remove date and time
-	//log.SetOutput(gelfWriter)
 
 	log.Fatal(http.ListenAndServe(listenOnConfig, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// get payload
@@ -84,6 +81,7 @@ func main() {
 					"status":     gjson.Get(value.String(), "status").String(),
 				},
 			}
+
 			err := gelfWriter.WriteMessage(&msg)
 			if err != nil {
 				log.Printf("gelf write: %s", err)
