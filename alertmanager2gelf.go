@@ -14,58 +14,45 @@
 package main
 
 import (
-	"fmt"
-	"io/ioutil"
+	"context"
+	"github.com/sethvargo/go-envconfig"
+	"github.com/tidwall/gjson"
+	"gopkg.in/Graylog2/go-gelf.v2/gelf"
+	"io"
 	"log"
 	"net/http"
-
-	"github.com/spf13/viper"
-	"github.com/tidwall/gjson"
-	"gopkg.in/Graylog2/go-gelf.v1/gelf"
+	"time"
 )
 
+type envConfig struct {
+	ListenOn    string `env:"LISTEN_ON,required"`
+	GraylogAddr string `env:"GRAYLOG_ADDR,required"`
+	HostId      string `env:"HOST_ID,required"`
+}
+
 func main() {
+	var config envConfig
+	var ctx context.Context
 
-	// Define config file
-	viper.SetDefault("listenOn", "localhost:5001")
-	viper.SetDefault("graylogAddr", "localhost:12201")
-	viper.SetConfigName("alertmanager2gelf")       // name of config file (without extension)
-	viper.AddConfigPath("/etc/alertmanager2gelf/") // path to look for the config file in
-
-	// Read config file
-	err := viper.ReadInConfig()
-	if err != nil {
-		panic(fmt.Errorf("Fatal error config file: %s", err))
+	if err := envconfig.Process(ctx, &config); err != nil {
+		panic(err)
 	}
-
-	// Checks config parameters
-	listenOnConfig := viper.GetString("listenOn")
-	if listenOnConfig == "" {
-		panic(fmt.Errorf("Fatal error in config file: missing 'listenOn' parameter"))
-	}
-
-	graylogAddrConfig := viper.GetString("graylogAddr")
-	if graylogAddrConfig == "" {
-		panic(fmt.Errorf("Fatal error in config file: missing 'graylogAddrConfig' parameter"))
-	}
+	listenOnConfig := config.ListenOn
+	graylogAddrConfig := config.GraylogAddr
 
 	// Log service informations on startup
 	log.Printf("Service is listening on: '%s'", listenOnConfig)
 	log.Printf("Graylog server defined is: '%s'", graylogAddrConfig)
 
-	if graylogAddrConfig != "" {
-		gelfWriter, err := gelf.NewWriter(graylogAddrConfig)
-		if err != nil {
-			log.Fatalf("gelf.NewWriter: %s", err)
-		}
-		// Log to graylog2
-		log.SetFlags(0) // Remove date and time
-		log.SetOutput(gelfWriter)
+	gelfWriter, err := gelf.NewUDPWriter(graylogAddrConfig)
+	if err != nil {
+		log.Fatalf("gelf.NewWriter: %s", err)
 	}
+	defer gelfWriter.Close()
 
 	log.Fatal(http.ListenAndServe(listenOnConfig, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// get payload
-		promJSON, err := ioutil.ReadAll(r.Body)
+		promJSON, err := io.ReadAll(r.Body)
 		// set payload as string
 		spromJSON := string(promJSON)
 
@@ -79,6 +66,27 @@ func main() {
 		// iterate over alerts
 		result.ForEach(func(key, value gjson.Result) bool {
 			log.Printf(value.String())
+			msg := gelf.Message{
+				Facility: "alertmanager2gelf",
+				Version:  "1",
+				Host:     config.HostId,
+				Short:    gjson.Get(value.String(), "labels.alertname").String(),
+				TimeUnix: float64(time.Now().Unix()),
+				Extra: map[string]interface{}{
+					"alertgroup": gjson.Get(value.String(), "labels.alertgroup").String(),
+					"env":        gjson.Get(value.String(), "labels.env").String(),
+					"host_name":  gjson.Get(value.String(), "labels.host_name").String(),
+					"job":        gjson.Get(value.String(), "labels.job").String(),
+					"severity":   gjson.Get(value.String(), "labels.severity").String(),
+					"status":     gjson.Get(value.String(), "status").String(),
+					"tag": "alertmanager2gelf",
+				},
+			}
+
+			err := gelfWriter.WriteMessage(&msg)
+			if err != nil {
+				log.Printf("gelf write: %s", err)
+			}
 			return true // keep iterating
 		})
 
