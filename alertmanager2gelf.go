@@ -79,6 +79,7 @@ func main() {
 					"job":        gjson.Get(value.String(), "labels.job").String(),
 					"severity":   gjson.Get(value.String(), "labels.severity").String(),
 					"status":     gjson.Get(value.String(), "status").String(),
+					"tag": "alertmanager2gelf",
 				},
 			}
 
