@@ -20,6 +20,7 @@ import (
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"time"
 )
@@ -66,26 +67,28 @@ func main() {
 		// iterate over alerts
 		result.ForEach(func(key, value gjson.Result) bool {
 			log.Printf(value.String())
-			team := gjson.Get(value.String(), "labels.team").String()
-			if team == "" {
-				team = "none"
+			extra := map[string]interface{}{
+				"status": gjson.Get(value.String(), "status").String(),
+				"tag":    "alertmanager2gelf",
 			}
+			labels := gjson.Get(value.String(), "labels")
+			// iterate over labels
+			labels.ForEach(func(key, value gjson.Result) bool {
+				label := map[string]interface{}{
+					key.String(): value.String(),
+				}
+				if key.String() != "alertname" {
+					maps.Copy(extra, label)
+				}
+				return true // keep iterating
+			})
 			msg := gelf.Message{
 				Facility: "alertmanager2gelf",
-				Version:  "1",
+				Version:  "2",
 				Host:     config.HostId,
 				Short:    gjson.Get(value.String(), "labels.alertname").String(),
 				TimeUnix: float64(time.Now().Unix()),
-				Extra: map[string]interface{}{
-					"alertgroup": gjson.Get(value.String(), "labels.alertgroup").String(),
-					"env":        gjson.Get(value.String(), "labels.env").String(),
-					"host_name":  gjson.Get(value.String(), "labels.host_name").String(),
-					"job":        gjson.Get(value.String(), "labels.job").String(),
-					"severity":   gjson.Get(value.String(), "labels.severity").String(),
-					"status":     gjson.Get(value.String(), "status").String(),
-					"team":       team,
-					"tag":        "alertmanager2gelf",
-				},
+				Extra:    extra,
 			}
 
 			err := gelfWriter.WriteMessage(&msg)
