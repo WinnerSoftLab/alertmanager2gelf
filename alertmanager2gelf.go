@@ -66,6 +66,10 @@ func main() {
 		// iterate over alerts
 		result.ForEach(func(key, value gjson.Result) bool {
 			log.Printf(value.String())
+			team := gjson.Get(value.String(), "labels.team").String()
+			if team == "" {
+				team = "none"
+			}
 			msg := gelf.Message{
 				Facility: "alertmanager2gelf",
 				Version:  "1",
@@ -79,7 +83,8 @@ func main() {
 					"job":        gjson.Get(value.String(), "labels.job").String(),
 					"severity":   gjson.Get(value.String(), "labels.severity").String(),
 					"status":     gjson.Get(value.String(), "status").String(),
-					"tag": "alertmanager2gelf",
+					"team":       team,
+					"tag":        "alertmanager2gelf",
 				},
 			}
 
